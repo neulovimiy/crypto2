@@ -1036,6 +1036,18 @@ DWORD WINAPI RSAThread(LPVOID lpParam) {
 
 
 
+#include <filesystem>
+#include <string>
+#include <iostream>
+
+std::string getFileExtension(const std::string& filePath) {
+    size_t dotPos = filePath.find_last_of(".");
+    if (dotPos != std::string::npos) {
+        return filePath.substr(dotPos);
+    }
+    return ""; // Если расширение не найдено
+}
+
 void handleRSACryptoEncryption(HWND hwnd) {
     // Путь к файлу с открытым ключом по умолчанию
     std::string defaultPublicKeyFile = "rsa_public_key.pem";
@@ -1050,8 +1062,16 @@ void handleRSACryptoEncryption(HWND hwnd) {
     std::string inputFile = openFileDialog(hwnd, "Выберите файл для шифрования");
     if (inputFile.empty()) return;
 
+    // Получаем расширение исходного файла
+    std::string fileExtension = getFileExtension(inputFile);
+
     std::string outputFile = saveFileDialog(hwnd, "Выберите файл для сохранения зашифрованных данных", "All Files (*.*)\0*.*\0");
     if (outputFile.empty()) return;
+
+    // Если пользователь не указал расширение, добавляем расширение исходного файла
+    if (getFileExtension(outputFile).empty() && !fileExtension.empty()) {
+        outputFile += fileExtension;
+    }
 
     std::ifstream fileIn(inputFile, std::ios::binary);
     if (!fileIn) {
@@ -1090,31 +1110,15 @@ void handleRSACryptoEncryption(HWND hwnd) {
 
     CreateThread(NULL, 0, RSAThread, params, 0, NULL);
 }
-void overwriteFileWithRandomData(const std::string& filePath) {
-    const size_t bufferSize = 1024; // Размер буфера для случайных данных
-    std::vector<unsigned char> randomData(bufferSize);
-
-    // Генерация случайных данных
-    HCRYPTPROV hCryptProv;
-    if (CryptAcquireContext(&hCryptProv, NULL, NULL, PROV_RSA_FULL, 0)) {
-        CryptGenRandom(hCryptProv, bufferSize, randomData.data());
-        CryptReleaseContext(hCryptProv, 0);
-    } else {
-        // Если CryptGenRandom недоступен, используем rand()
-        for (size_t i = 0; i < bufferSize; ++i) {
-            randomData[i] = static_cast<unsigned char>(rand() % 256);
-        }
+class TempFileGuard {
+public:
+    TempFileGuard(const std::string& filePath) : filePath(filePath) {}
+    ~TempFileGuard() {
+        std::remove(filePath.c_str());
     }
-
-    // Перезапись файла
-    std::ofstream outFile(filePath, std::ios::binary | std::ios::trunc);
-    if (outFile) {
-        outFile.write(reinterpret_cast<char*>(randomData.data()), bufferSize);
-        outFile.close();
-    } else {
-        showMessageN("Ошибка: Не удалось перезаписать файл случайными данными.");
-    }
-}
+private:
+    std::string filePath;
+};
 void handleCompleteDecryption(HWND hwnd) {
     // Шаг 1: Выбор файла с зашифрованным ключом
     std::string encryptedPrivateKeyPath = openFileDialog(hwnd, "Выберите зашифрованный закрытый ключ RSA");
@@ -1209,13 +1213,12 @@ void handleCompleteDecryption(HWND hwnd) {
     params->encrypt = false;
 
     CreateThread(NULL, 0, RSAThread, params, 0, NULL);
-
+    
     // Шаг 10: Удаление временного файла после завершения
     std::atexit([]() {
         std::remove("temp_decrypted_key.pem");
     });
 }
-
 // Функция для генерации ключа и IV
 std::string toHexString(const std::vector<unsigned char>& data) {
     std::ostringstream hexStream;
@@ -1326,7 +1329,7 @@ void showHashWindow(HWND parentHwnd, const std::string& hash) {
     std::wstring hashWStr = std::wstring(hash.begin(), hash.end());
     SetWindowTextW(hEdit, hashWStr.c_str());
 
-    // Показываем окно
+    // Показываем окно ...
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
 
@@ -1451,9 +1454,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             showMessageN("Операция RSA успешно завершена!");
         } else {
             showMessageN("Операция RSA не завершена!");
-
-            // Перезапись выходного файла случайными данными
-            overwriteFileWithRandomData(params->outputFile);
+            std::remove("temp_decrypted_key.pem");
         }
 
         // Удаление временного ключа
