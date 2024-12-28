@@ -157,6 +157,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) 
             showMessageN("Операция RSA успешно завершена!");
         } else {
             showMessageN("Операция RSA не завершена!");
+            std::remove("temp_decrypted_key.pem");
         }
         std::remove("temp_decrypted_key.pem");
         return 0;
@@ -259,12 +260,15 @@ std::vector<unsigned char> hexStringToBytes(const std::string& hex) {
     return bytes;
 }
 
-// Диалог для ввода ключа/iv
 INT_PTR CALLBACK DialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static std::string *keyIvString = nullptr;
     switch (uMsg) {
         case WM_INITDIALOG:
             keyIvString = (std::string*)lParam;
+            // Устанавливаем символ для отображения вместо вводимых символов
+            SendDlgItemMessage(hwndDlg, IDC_KEY_IV, EM_SETPASSWORDCHAR, (WPARAM)'*', 0);
+            // Обновляем элемент управления, чтобы применить изменения
+            SendDlgItemMessage(hwndDlg, IDC_KEY_IV, EM_SETPASSWORDCHAR, (WPARAM)'*', 0);
             return TRUE;
         case WM_COMMAND:
             if (LOWORD(wParam) == IDOK) {
@@ -282,7 +286,6 @@ INT_PTR CALLBACK DialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lPara
     return FALSE;
 }
 
-// Функция для запроса ключа и IV у пользователя
 std::pair<std::string, std::string> getKeyAndIV(HWND hwnd) {
     std::string keyIvString;
     if (DialogBoxParam(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_DIALOG1), hwnd, DialogProc, (LPARAM)&keyIvString) != IDOK) {
@@ -302,7 +305,6 @@ std::pair<std::string, std::string> getKeyAndIV(HWND hwnd) {
     std::string ivHex = keyIvString.substr(colonPos + 1);
     return std::make_pair(keyHex, ivHex);
 }
-
 // Обёртки для rsa, aes, ecc функций
 void handleRSAKeyGeneration(HWND hwnd, const std::string& entropyData, const std::string& keyHex, const std::string& ivHex) {
     std::vector<unsigned char> key = hexStringToBytes(keyHex);
@@ -1119,6 +1121,7 @@ public:
 private:
     std::string filePath;
 };
+
 void handleCompleteDecryption(HWND hwnd) {
     // Шаг 1: Выбор файла с зашифрованным ключом
     std::string encryptedPrivateKeyPath = openFileDialog(hwnd, "Выберите зашифрованный закрытый ключ RSA");
@@ -1182,11 +1185,19 @@ void handleCompleteDecryption(HWND hwnd) {
         return;
     }
 
+    // Получаем расширение исходного файла
+    std::string fileExtension = getFileExtension(inputFile);
+
     // Шаг 7: Выбор файла для сохранения расшифрованных данных
-    std::string outputFile = openFileDialog(hwnd, "Выберите файл для сохранения расшифрованных данных");
+    std::string outputFile = saveFileDialog(hwnd, "Выберите файл для сохранения расшифрованных данных", "All Files (*.*)\0*.*\0");
     if (outputFile.empty()) {
         std::remove(tempDecryptedKeyPath.c_str());
         return;
+    }
+
+    // Если пользователь не указал расширение, добавляем расширение исходного файла
+    if (getFileExtension(outputFile).empty() && !fileExtension.empty()) {
+        outputFile += fileExtension;
     }
 
     // Шаг 8: Создание окна прогресса
@@ -1421,7 +1432,9 @@ void showPassword(const std::string& password) {
     }
 }
 
-// Окно и кнопки
+
+
+// Обработчик сообщений
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if ((uMsg == WM_UPDATE_PROGRESS && WM_UPDATE_PROGRESS != 0) || 
         (WM_UPDATE_PROGRESS != 0 && RegisterWindowMessageA("WM_UPDATE_PROGRESS") == uMsg)) {
@@ -1439,31 +1452,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     }
 
     if ((uMsg == WM_RSA_DONE && WM_RSA_DONE != 0) ||
-        (WM_RSA_DONE != 0 && RegisterWindowMessageA("WM_RSA_DONE") == uMsg)) {
-        BOOL success = (BOOL)wParam;
+    (WM_RSA_DONE != 0 && RegisterWindowMessageA("WM_RSA_DONE") == uMsg)) {
+    BOOL success = (BOOL)wParam;
 
-        // Получаем указатель на params из lParam
-        RSAParams* params = reinterpret_cast<RSAParams*>(lParam);
+    // Получаем указатель на params из lParam
+    RSAParams* params = reinterpret_cast<RSAParams*>(lParam);
 
-        if (globalProgressHwnd) {
-            DestroyWindow(globalProgressHwnd);
-            globalProgressHwnd = NULL;
-        }
+    if (globalProgressHwnd) {
+        DestroyWindow(globalProgressHwnd);
+        globalProgressHwnd = NULL;
+    }
 
-        if (success) {
-            showMessageN("Операция RSA успешно завершена!");
-        } else {
-            showMessageN("Операция RSA не завершена!");
-            std::remove("temp_decrypted_key.pem");
-        }
+    if (success) {
+        showMessageN("Операция RSA успешно завершена!");
+    } else {
+        showMessageN("Операция RSA не завершена!");
 
         // Удаление временного ключа
         std::remove("temp_decrypted_key.pem");
-
-        // Освобождаем память, выделенную для params
-        delete params;
-        return 0;
     }
+
+    // Освобождаем память, выделенную для params
+    delete params;
+    return 0;
+}
     switch (uMsg) {
         case WM_COMMAND:
             switch (LOWORD(wParam)) {
